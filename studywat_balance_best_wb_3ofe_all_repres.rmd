@@ -1,0 +1,1819 @@
+---
+title: "Study water balance of three ofes with pavement"
+output:
+  html_document:
+    theme: cerulean
+    fig_caption: yes
+    fig_height: 8
+    fig_width: 8
+    number_sections: no
+    toc: true
+    toc_depth: 6
+    toc_float: false
+    toc_title: "Table of contents"
+
+---
+
+
+<!-- date: '2022-08-02' -->
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+library(dplyr)
+library(tidyr)
+# install.packages("Kendall")
+library(Kendall)
+library(trend)
+library(knitr)
+library(ggplot2)
+library(lme4)
+library(broom)
+library(purrr)
+library(trend)
+#install.packages("ggh4x")
+library(ggh4x)
+#install.packages("ggpmisc")
+library(ggpmisc)
+#install.packages("ggprism")
+library(ggprism)
+```
+
+
+```{r, include=FALSE}
+### graph materials ###
+
+my_custom_themes<-theme_bw()+
+  theme(plot.margin = unit(c(0.5,0.5,0.6,0.5), "cm"),
+        legend.position = c(.98, .20),
+        legend.direction = "horizontal",
+        legend.justification = c("right", "top"),
+        legend.box.just = "right",
+        legend.margin = margin(6, 6, 6, 6), 
+        # legend.title = element_text(size = 12), 
+        legend.title = element_blank(),
+        legend.text = element_text(size = 10)
+  )+
+  # labs(title = paste("Erosion in relation to", factor[n1]))+xlab("Scenarios")+ 
+  theme(axis.title.x = element_blank(), axis.title.y = element_text(size =20),
+        axis.text.x.bottom = element_text(angle = 70, hjust = 1, size = 20),
+        axis.text.y.left = element_text(size = 20),
+        plot.margin = unit(c(0.3,0.3,0.6,0.3), "cm"),plot.title = element_text(hjust = 0.5, size = 22), panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(), axis.line = element_line(colour = "black"))
+
+```
+
+
+```{r, include = FALSE}
+convert_jul_to_date <-function(jul, year){
+  j = jul - 1 ## because julian day starts with 1 in our data frame so we need this correction
+  
+  org = as.Date(paste0(year,"-01-01"))
+  date = as.character(as.Date(j, org))
+  return(date)
+}
+
+depth <- 1000
+por <-0.5
+
+calc_sat <-function(slwat, frzwat, depth){
+  twat = slwat + frzwat
+  total_pore_space = por * depth
+  sat = round((twat/total_pore_space)*100,2)
+  return(sat)
+}
+
+id_wateryr<-function(year,month){
+  
+  if (month>9){
+    watyear=year+1
+  }else{
+    watyear=year
+  }
+  return(watyear)
+}
+
+
+###### relevant waterbalance variables ###############################################################################
+vc<-c(1,2,3,5,6,7,8,9,10,11,12,13,14,15,17)
+nms2<-c("OFE", "J","Y", "Rain+snowmelt","Runoff","Ep","Es","Er","Deep perc.", "Runon added to OFE","Subsurface runon added to OFE",
+        "Lateral subsurface flow","Total Soil water","Frozen Soil Water", "QOFE")
+#####################################################################################################################
+
+```
+
+
+```{r, include=FALSE}
+#### Data entry #######
+
+for (i in 28:122){
+
+  scs<-paste0("Sce",i)
+  
+weppdata1 <- read.table(paste0("F:/WORK/GSI_Project/WEPP vs HSI/New_scenarios_puyallup_1_2_ofes/All_representative_data/3_OFE/",scs,"/output/watr_0.txt"), skip = 23)
+weppdata1<-weppdata1[,vc]
+colnames(weppdata1)<-nms2
+
+final_sum <-read.table(paste0("F:/WORK/GSI_Project/WEPP vs HSI/New_scenarios_puyallup_1_2_ofes/All_representative_data/3_OFE/",scs,"/output/grph_0.txt"), skip = 121)
+
+### col numbers names 
+
+# 45 <- Depth to drainable zone
+# 
+# 60 <- SW_layer 1
+# 61<- SW_layer 2
+# 62 <- SW_layer 3
+# 63 <- SW_layer 4
+# 64<- SW_layer 5
+final_sum_all<-final_sum
+
+final_sum<-as.data.frame(final_sum[,c(45)])
+colnames(final_sum)<-c("Depth_to_drainable_zone")
+
+final_sum$Depth_to_drainable_zone <-final_sum$Depth_to_drainable_zone * 304.8
+
+# final_sum$Scenario <- scs
+final_sum<-as.data.frame(final_sum[1:(nrow(final_sum)-2),])
+colnames(final_sum)<-c("Depth_to_drainable_zone")
+weppdata1<-cbind(weppdata1, final_sum)
+
+# sw_lyrs<-final_sum_all[, c(60, 61,62,63,64, 65, 66, 67, 68, 69)]* 25.4
+# sw_lyrs<-as.data.frame(sw_lyrs[1:(nrow(sw_lyrs)-2),])
+# 
+# colnames(sw_lyrs)<-c("SW_L1", "SW_L2", "SW_L3", "SW_L4", "SW_L5", "SW_L6", "SW_L7", "SW_L8", "SW_L9", "SW_L10")
+
+sw_lyrs<-final_sum_all[, c(39, 60, 61,62,63,64, 65, 66, 67, 68, 69,95,96,97,98,99,100,101,102,103,104)]*25.4
+sw_lyrs<-as.data.frame(sw_lyrs[1:(nrow(sw_lyrs)-2),])
+
+colnames(sw_lyrs)<-c("Porosity","SW_L1", "SW_L2", "SW_L3", "SW_L4", "SW_L5", "SW_L6", "SW_L7", "SW_L8", "SW_L9", "SW_L10",
+                     "FW_L1", "FW_L2", "FW_L3", "FW_L4", "FW_L5", "FW_L6", "FW_L7", "FW_L8", "FW_L9", "FW_L10")
+
+sw_lyrs$Porosity<-sw_lyrs$Porosity/25.4 ### correcting for the conversion above.. because we dont need it in porosity
+
+weppdata1<-cbind(weppdata1, sw_lyrs)
+weppdata1$Scenario <- scs
+
+
+
+
+# if(i<6){
+#   weppdata1$Group<-"Group A"
+# }else if (i>5&i<11) {
+#   weppdata1$Group<-"Group B"
+# } else if (i>10&i<16){
+#   weppdata1$Group<-"Group C"
+# } else if (i>15&i<21){
+#   weppdata1$Group<-"Group D"
+# } else if (i>20&i<26){
+#   weppdata1$Group<-"Group E"
+# } else if (i>25&i<31){
+#   weppdata1$Group<-"Group F"  
+# } else if (i>30&i<36){
+#   weppdata1$Group<-"Group G"
+# } else if (i>35&i<41){
+#   weppdata1$Group<-"Group H"
+# } else if (i>40&i<46){
+#   weppdata1$Group<-"Group I"
+# } else if (i>45&i<51){
+#   weppdata1$Group<-"Group J"
+# } else {
+#   weppdata1$Group<-"Group K"
+# }
+
+
+if(i==28){
+  weppdata <- weppdata1
+}else{
+  weppdata<-rbind(weppdata, weppdata1)
+}
+
+
+}
+
+
+weppdata$Date<-mapply(convert_jul_to_date,  as.matrix(weppdata[,2]),as.matrix(weppdata[,3]))
+#weppdata$sat<-mapply(calc_sat,  as.matrix(weppdata[,13]),as.matrix(weppdata[,14]))
+# clidata$seasons<-mapply(id_seasons,  as.matrix(as.matrix(clidata[,2])))
+weppdata<-weppdata%>%
+  separate(Date, c("Year","Month","Day"), sep="-")
+
+weppdata$ET <- weppdata$Ep+weppdata$Es+weppdata$Er
+
+
+weppdata$Wateryear<-mapply(id_wateryr,  as.matrix(weppdata[,39]),as.matrix(weppdata[,40]))
+
+```
+
+
+
+```{r, echo=FALSE, include=FALSE}
+# Annual averages in all scenarios
+
+scena_dets<-read.csv(paste0("F:/WORK/GSI_Project/WEPP vs HSI/New_scenarios_puyallup_1_2_ofes/All_representative_data/scenario_description_3ofe.csv"))
+
+names<-c("Group", "Runs","Res_layer","Slope_steepness","Slope_length", "Depth", "SoilK","Anisotropy","Treatment", "Remarks","Remarks2")
+
+colnames(scena_dets)<-names
+
+scena_dets$Slope_length <-factor(scena_dets$Slope_length, levels = c("25 m","50 m", "100 m", "200 m")) 
+
+
+####### Calculating HSI for each hillslopes ###########
+
+scena_dets$sl2<-scena_dets$Slope_length
+
+scena_dets$sd2<-scena_dets$Depth
+
+scena_dets2<-separate(scena_dets, col = c("sl2"), into = c("sl"), sep = " ")
+scena_dets2<-separate(scena_dets2, col = c("sd2"), into = c("sd"), sep = " ")
+
+scena_dets2$sl<-as.numeric(scena_dets2$sl)
+scena_dets2$sd<-as.numeric(scena_dets2$sd)
+scena_dets2$SoilK<-0.024*as.numeric(scena_dets2$SoilK)
+scena_dets2$stp <-ifelse(scena_dets2$Slope_steepness==0, 0.0001, scena_dets2$Slope_steepness)
+
+scena_dets2$TWI <- log((scena_dets2$sl*10/10)/scena_dets2$stp)
+scena_dets2$SWSC <- log((scena_dets2$SoilK)*scena_dets2$sd)
+scena_dets2$HSI <- scena_dets2$TWI-scena_dets2$SWSC
+
+######################################################
+
+
+
+scena_dets$Slope_depth <- paste0(scena_dets$Slope_steepness, "_", scena_dets$Depth)
+
+scena_dets2$Slope_depth <- paste0(scena_dets2$Slope_steepness, "_", scena_dets2$Depth)
+
+weppdata_joined<-merge(weppdata, scena_dets2, by.x = c("Scenario"), by.y = c("Runs"))
+df<-weppdata_joined
+
+
+### Correcting for OFEs ###
+
+df$stp2<-ifelse(df$OFE==1|df$OFE==3, df$stp/2,df$stp)
+
+df$stp2<-ifelse(df$OFE==1|df$OFE==3,ifelse(df$stp==0.0001,df$stp,df$stp/2),df$stp)
+
+
+df$sl2 <- ifelse(df$OFE==1|df$OFE==3, df$sl*0.15, df$sl-(df$sl*0.3))
+df$sl3<-ifelse(df$OFE==2, df$sl*0.15+(df$sl-(df$sl*0.3)), df$sl2)
+df$sl3<-ifelse(df$OFE==3, df$sl, df$sl3)
+
+df$TWI <-log((df$sl3*10/10)/df$stp2)
+df$HSI<-df$TWI-df$SWSC
+####Length ############
+```
+
+
+#### Associating Runoff values with different HSI values 
+
+```{r, echo=FALSE}
+
+scesa <-c("Sce28", "Sce29","Sce30",
+         "Sce31", "Sce32","Sce33",
+         "Sce34", "Sce35","Sce36",
+         "Sce37","Sce38","Sce39",
+         "Sce52","Sce53","Sce54",
+         "Sce55",
+         "Sce56","Sce57","Sce58")
+
+scesb<-c("Sce75", "Sce76","Sce77","Sce78", "Sce79","Sce80",
+            "Sce81", "Sce82","Sce83","Sce84", "Sce85","Sce86",
+            "Sce87", "Sce88","Sce89","Sce90", "Sce91","Sce92",
+            "Sce93","Sce94","Sce96","Sce97","Sce102")
+
+scesss<-c(scesa, scesb)
+
+df_HSI <-df[df$Scenario%in%scesss,]
+
+agg1_ofe_A_h<-aggregate(cbind(Runoff,ET, `Lateral subsurface flow`, `Deep perc.`)~OFE+Year+Scenario+HSI+TWI+SWSC+stp2+sl2+sl3+SoilK+sd,df_HSI, sum)
+
+agg1_ofe_B_h<-aggregate(cbind(Runoff,ET, `Lateral subsurface flow`, `Deep perc.`)~OFE+Scenario+HSI+TWI+SWSC+stp2+sl2+sl3+SoilK+sd,agg1_ofe_A_h, mean)
+
+agg1_ofe_B_h<-agg1_ofe_B_h[agg1_ofe_B_h$stp2>0.0001,]
+
+ggplot(agg1_ofe_B_h, aes(HSI, Runoff))+geom_point(color = "blue")+
+  scale_x_continuous(limits = c(2.5,12.5), n.breaks = 5, expand = c(0,0))+
+  scale_y_continuous(limits = c(0,500), n.breaks = 5, expand = c(0,0))+
+  theme_classic()+
+  my_custom_themes+
+  
+  xlab("HSI")+
+  ylab("Runoff (mm)")+
+  theme(axis.title.x = element_text(size =14),
+        plot.margin = unit(c(1,1,1,1),"cm"))
+#ggsave("HSI_vs_RUNOFF.eps", height = 8, width = 12)
+library(plotly)
+fig<-plot_ly(data = agg1_ofe_B_h, x = ~HSI, y = ~Runoff)
+
+median(agg1_ofe_B_h$HSI)
+
+### classifying HSI 
+
+groups<-quantile(agg1_ofe_B_h$HSI, probs = seq(0,1,1/5))
+
+
+
+```
+
+
+
+### Phase 1: Analysis of hillslope hydrological processess 
+
+#### only looking at scenarios 28 - 39
+
+```{r, echo=FALSE, include=FALSE}
+
+Scens<-c("Sce28", "Sce29","Sce30",
+         "Sce31", "Sce32","Sce33",
+         "Sce34", "Sce35","Sce36",
+         "Sce52","Sce53","Sce54",
+         "Sce55",
+         "Sce56","Sce57","Sce58")
+
+df_A <-df[df$Scenario%in%Scens,]
+
+#### summarizing #######
+
+agg0<-aggregate(cbind(`Rain+snowmelt`)~Year+Scenario+Group,df_A, sum)
+
+agg1_ofe_A<-aggregate(cbind(Runoff,ET, `Lateral subsurface flow`, `Deep perc.`)~OFE+Year+Scenario+Group+
+                  Res_layer+Slope_steepness+Slope_length+Slope_depth,df_A, sum)
+
+
+# agg_drain_depth<-aggregate(cbind(`Total Soil water`,`Depth_to_drainable_zone`)~Scenario+Group+
+                  # Res_layer+Slope_steepness+Slope_length,df, mean)
+
+agg2_ofe_A<-aggregate(cbind(Runoff,ET, `Lateral subsurface flow`, `Deep perc.`)~OFE+Scenario+Group+
+                  Res_layer+Slope_steepness+Slope_length+Slope_depth, agg1_ofe_A,mean)
+
+agg1_piv_ofe_A<-pivot_longer(agg2_ofe_A, cols = c("Runoff","ET","Lateral subsurface flow", "Deep perc."), names_to = "Wat_vars", values_to = "Water Depth (mm)")
+
+agg1_piv_ofe_A$Wat_vars<-factor(agg1_piv_ofe_A$Wat_vars, levels = c("ET","Runoff","Lateral subsurface flow", "Deep perc."))
+#agg1_piv$OFE<-as.factor(agg1_piv$OFE)
+
+# agg_depth_piv<-pivot_longer(agg_drain_depth, cols = c("Total Soil water","Depth_to_drainable_zone"), names_to = "Wat_vars", values_to = "Water Depth (mm)")
+#agg1_piv$OFE<-as.factor(agg1_piv$OFE)
+
+# final_pivs <-rbind(agg1_piv, agg_depth_piv)
+
+agg1_piv_ofe_A$Slope_length<-as.factor(agg1_piv_ofe_A$Slope_length)
+
+ggplot(agg1_piv_ofe_A, aes(fill = Slope_length, x = OFE, `Water Depth (mm)`), check_overlap = TRUE)+geom_bar(position = "dodge", stat = "identity", color = "black")+
+# scale_fill_manual(values=len_col_3)+  
+  # geom_text(aes(fill = Slope_length, x = Wat_vars, y =`Water Depth (mm)`,  label = `Water Depth (mm)`, angle = 90), 
+             # position = position_dodge(0.9))+
+  facet_grid(rows = vars(Slope_steepness), cols = vars(Wat_vars))+
+  scale_y_continuous(limits = c(0,2500), n.breaks = 7, expand = c(0,0))+
+  # facet_wrap(~Slope_steepness+Res_layer, nrow = 3, scales = "free")+ 
+  my_custom_themes+
+    theme(panel.spacing = unit(2, "lines"))+
+  theme(strip.text = element_text(size = 21))+
+  theme(axis.title.x = element_text(size = 30))+
+  theme(axis.text.x.bottom = element_text(angle = 0, size = 25),
+        # legend.title = element_text(size = 23),
+        legend.text = element_text(size = 30),
+        legend.direction = "vertical",
+        legend.position = c(0.70, 0.9))
+
+# ggsave('water_balance_3ofe_separately_vary_length_steepness2.eps', width = 16, height = 10)
+
+########## Heat map for only Runoff
+
+agg1_piv_ofe_A_runoff<-agg1_piv_ofe_A[agg1_piv_ofe_A$Wat_vars=="Runoff",]
+
+agg1_piv_ofe_A_runoff$Slope_steepness<-as.character(agg1_piv_ofe_A_runoff$Slope_steepness)
+agg1_piv_ofe_A_runoff$Slope_steepness<-as.factor(agg1_piv_ofe_A_runoff$Slope_steepness)
+agg1_piv_ofe_A_runoff$Slope_steepness<-factor(agg1_piv_ofe_A_runoff$Slope_steepness, levels = c("0","0.075", "0.15", "0.3"))
+
+cols_A<-c("#8c510a","#d8b365","#f6e8c3","#f5f5f5",
+        "#c7eae5","#5ab4ac","#01665e")
+cols_B<-c("#fdd49e","#fc8d59","#ef6548","#d7301f","#990000")
+
+breaks<-c(0,50, 100, 200,300,400,500)
+ggplot(agg1_piv_ofe_A_runoff, aes(x = Slope_steepness,y = Slope_length, fill =  `Water Depth (mm)`))+
+  geom_tile()+
+scale_fill_gradientn(colours = cols_B, breaks = breaks)+
+  # geom_bar(position = "dodge", stat = "identity", color = "black")+
+# scale_fill_manual(values=len_col_3)+  
+ geom_text(aes( label = round(`Water Depth (mm)`,2)))+
+  facet_wrap(~OFE)+
+  # facet_grid(rows = vars(OFE), cols = vars(Wat_vars))+
+  # scale_y_continuous(limits = c(0,2500), n.breaks = 7, expand = c(0,0))+
+  # facet_wrap(~Slope_steepness+Res_layer, nrow = 3, scales = "free")+ 
+  my_custom_themes+
+    theme(panel.spacing = unit(2, "lines"))+
+  theme(strip.text = element_text(size = 21))+
+  theme(axis.title.x = element_text(size = 30))+
+  theme(axis.text.x.bottom = element_text(angle = 15, size = 25),
+        # legend.title = element_text(size = 23),
+        legend.text = element_text(size = 30),
+        legend.direction = "vertical",
+        legend.position = "right")
+#ggsave('runoff_3ofe_separately_vary_length_steepness2_Tile.eps', width = 16, height = 10)
+
+
+```
+
+##### Create a surface plot 
+
+```{r, include=FALSE, echo=FALSE}
+
+library(reshape2)
+
+agg1_piv_ofe_A_runoff<-separate(agg1_piv_ofe_A_runoff, "Slope_length", into = c("slp", "in"), sep = " m")
+# agg1_piv_ofe_A_runoff$slopelen2<-as.numeric(unlist(str_split(agg1_piv_ofe_A_runoff$Slope_length, " m"))[1])
+agg1_piv_ofe_A_runoff$slp <-as.numeric(agg1_piv_ofe_A_runoff$slp)
+
+
+mydata_matrix <- acast(agg1_piv_ofe_A_runoff, slp~Slope_steepness, value.var = "Water Depth (mm)",mean)
+
+# persp(x = agg1_piv_ofe_A_runoff$Slope_steepness , y = agg1_piv_ofe_A_runoff$Slope_length, z = mydata_matrix, xlab = "Slope Length", ylab = "Slope Steepness", zlab = "Runoff")
+
+library(plotly)
+# plot_ly(z = ~mydata_matrix, x = unique(agg1_piv_ofe_A_runoff$slp), y =  unique(agg1_piv_ofe_A_runoff$Slope_steepness), type = "surface")
+l <- list(
+  font = list(
+    family = "sans-serif",
+    size = 14,
+    color = "black"),
+  bgcolor = "white",
+  bordercolor = "black",
+  x = 0, y = 1,
+  orientation = "v",
+  borderwidth = 3,
+  title=list(text='<b> Runoff (mm) </b>'))
+
+ps<-plot_ly(z = mydata_matrix,
+        x = colnames(mydata_matrix), 
+        y = row.names(mydata_matrix),
+        type = "surface")%>%
+  layout(scene = list(xaxis = list(title = "Slope steepness"), yaxis = list(title = "Slope length (m)"),zaxis = list(title = "Runoff (mm)")),
+         legend = l)%>%
+    layout(xaxis = list(titlefont = list(size = 30), tickfont = list(size = 30)),
+          yaxis = list(titlefont = list(size = 30), tickfont = list(size = 30)))
+
+# if (!require("processx")) install.packages("processx")
+library(processx)
+
+# orca(ps, "surface-plot_RUNOFF.eps")
+
+
+# plot_ly(z=~mydata_matrix)
+# plot_ly(z=~mydata_matrix, type = "surface")
+
+# plot_ly(x = agg1_piv_ofe_A_runoff$slp,y = agg1_piv_ofe_A_runoff$Slope_steepness, z = ~mydata_matrix)%>% add_surface()
+
+####
+# install.packages("plot3D")
+library(plot3D)
+# 
+# 
+# surf3D(as.matrix(agg1_piv_ofe_A_runoff$Slope_steepness), as.matrix(agg1_piv_ofe_A_runoff$Slope_length), as.matrix(agg1_piv_ofe_A_runoff$`Water Depth (mm)`), colvar = as.matrix(agg1_piv_ofe_A_runoff$`Water Depth (mm)`),
+#        colkey = TRUE, box = TRUE, bty = "b")
+
+
+```
+### Understanding the effect of rain garden, on different length steepness combination
+
+```{r, include=FALSE, echo=FALSE}
+# "Sce28", "Sce29","Sce30","Sce31", "Sce32","Sce33",
+#          "Sce34", "Sce35","Sce36","Sce52","Sce53","Sce54",
+#          "Sce55","Sce56","Sce57","Sce58",
+Scens_9<-c( "Sce59", "Sce60",  
+         "Sce61","Sce62", "Sce63","Sce64",
+         "Sce65", "Sce66","Sce67","Sce68","Sce69","Sce70",
+         "Sce71","Sce72","Sce73","Sce74")
+
+df_A_rn <-df[df$Scenario%in%Scens_9,]
+
+#### summarizing #######
+
+agg0<-aggregate(cbind(`Rain+snowmelt`)~Year+Scenario+Group,df_A_rn, sum)
+
+agg1_ofe_A_rn<-aggregate(cbind(Runoff,ET, `Lateral subsurface flow`, `Deep perc.`)~OFE+Year+Scenario+Group+
+                  Res_layer+Slope_steepness+Slope_length+Slope_depth,df_A_rn, sum)
+
+
+# agg_drain_depth<-aggregate(cbind(`Total Soil water`,`Depth_to_drainable_zone`)~Scenario+Group+
+                  # Res_layer+Slope_steepness+Slope_length,df, mean)
+
+agg2_ofe_A_rn<-aggregate(cbind(Runoff,ET, `Lateral subsurface flow`, `Deep perc.`)~OFE+Scenario+Group+
+                  Res_layer+Slope_steepness+Slope_length+Slope_depth, agg1_ofe_A_rn,mean)
+
+agg1_piv_ofe_A_rn<-pivot_longer(agg2_ofe_A_rn, cols = c("Runoff","ET","Lateral subsurface flow", "Deep perc."), names_to = "Wat_vars", values_to = "Water Depth (mm)")
+
+agg1_piv_ofe_A_rn$Wat_vars<-factor(agg1_piv_ofe_A_rn$Wat_vars, levels = c("ET","Runoff","Lateral subsurface flow", "Deep perc."))
+#agg1_piv$OFE<-as.factor(agg1_piv$OFE)
+
+# agg_depth_piv<-pivot_longer(agg_drain_depth, cols = c("Total Soil water","Depth_to_drainable_zone"), names_to = "Wat_vars", values_to = "Water Depth (mm)")
+#agg1_piv$OFE<-as.factor(agg1_piv$OFE)
+
+# final_pivs <-rbind(agg1_piv, agg_depth_piv)
+
+agg1_piv_ofe_A_rn$Slope_length<-as.factor(agg1_piv_ofe_A_rn$Slope_length)
+
+ggplot(agg1_piv_ofe_A_rn, aes(fill = Slope_length, x = OFE, `Water Depth (mm)`), check_overlap = TRUE)+geom_bar(position = "dodge", stat = "identity", color = "black")+
+# scale_fill_manual(values=len_col_3)+  
+  # geom_text(aes(fill = Slope_length, x = Wat_vars, y =`Water Depth (mm)`,  label = `Water Depth (mm)`, angle = 90), 
+             # position = position_dodge(0.9))+
+  facet_grid(rows = vars(Slope_steepness), cols = vars(Wat_vars))+
+  scale_y_continuous(limits = c(0,2500), n.breaks = 7, expand = c(0,0))+
+  # facet_wrap(~Slope_steepness+Res_layer, nrow = 3, scales = "free")+ 
+  my_custom_themes+
+    theme(panel.spacing = unit(2, "lines"))+
+  theme(strip.text = element_text(size = 21))+
+  theme(axis.title.x = element_text(size = 30))+
+  theme(axis.text.x.bottom = element_text(angle = 0, size = 25),
+        # legend.title = element_text(size = 23),
+        legend.text = element_text(size = 30),
+        legend.direction = "vertical",
+        legend.position = c(0.70, 0.9))
+
+# ggsave('water_balance_3ofe_separately_vary_length_steepness2_with_raingarden.eps', width = 16, height = 10)
+
+
+agg1_piv_ofe_A_runoff_rn<-agg1_piv_ofe_A_rn[agg1_piv_ofe_A_rn$Wat_vars=="Runoff",]
+
+agg1_piv_ofe_A_runoff_rn$Slope_steepness<-as.character(agg1_piv_ofe_A_runoff_rn$Slope_steepness)
+agg1_piv_ofe_A_runoff_rn$Slope_steepness<-as.factor(agg1_piv_ofe_A_runoff_rn$Slope_steepness)
+agg1_piv_ofe_A_runoff_rn$Slope_steepness<-factor(agg1_piv_ofe_A_runoff_rn$Slope_steepness, levels = c("0","0.075", "0.15", "0.3"))
+
+cols_A<-c("#8c510a","#d8b365","#f6e8c3","#f5f5f5",
+        "#c7eae5","#5ab4ac","#01665e")
+cols_B<-c("#fdd49e","#fc8d59","#ef6548","#d7301f","#990000")
+
+breaks<-c(0,50, 100, 200,300,400,500)
+ggplot(agg1_piv_ofe_A_runoff_rn, aes(x = Slope_steepness,y = Slope_length, fill =  `Water Depth (mm)`))+
+  geom_tile()+
+scale_fill_gradientn(colours = cols_B, breaks = breaks)+
+  # geom_bar(position = "dodge", stat = "identity", color = "black")+
+# scale_fill_manual(values=len_col_3)+  
+ geom_text(aes( label = round(`Water Depth (mm)`,2)))+
+  facet_wrap(~OFE)+
+  # facet_grid(rows = vars(OFE), cols = vars(Wat_vars))+
+  # scale_y_continuous(limits = c(0,2500), n.breaks = 7, expand = c(0,0))+
+  # facet_wrap(~Slope_steepness+Res_layer, nrow = 3, scales = "free")+ 
+  my_custom_themes+
+    theme(panel.spacing = unit(2, "lines"))+
+  theme(strip.text = element_text(size = 21))+
+  theme(axis.title.x = element_text(size = 30))+
+  theme(axis.text.x.bottom = element_text(angle = 15, size = 25),
+        # legend.title = element_text(size = 23),
+        legend.text = element_text(size = 30),
+        legend.direction = "vertical",
+        legend.position = "right")
+
+#ggsave('runoff_3ofe_separately_vary_length_steepness2_Tile_with_RG.eps', width = 16, height = 10)
+
+```
+
+#### How much runoff did the rain garden reduce? 
+
+```{r, echo=FALSE, include=FALSE}
+
+# "Sce28", "Sce29","Sce30","Sce31", "Sce32","Sce33",
+#          "Sce34", "Sce35","Sce36","Sce52","Sce53","Sce54",
+#          "Sce55","Sce56","Sce57","Sce58",
+Scens_10<-c("Sce28", "Sce29","Sce30","Sce31", "Sce32","Sce33",
+         "Sce34", "Sce35","Sce36","Sce52","Sce53","Sce54",
+         "Sce55","Sce56","Sce57","Sce58", "Sce59", "Sce60",
+         "Sce61","Sce62", "Sce63","Sce64",
+         "Sce65", "Sce66","Sce67","Sce68","Sce69","Sce70",
+         "Sce71","Sce72","Sce73","Sce74")
+
+df_A_rn_red <-df[df$Scenario%in%Scens_10,]
+
+agg0<-aggregate(cbind(`Rain+snowmelt`)~Year+Scenario+Group,df_A_rn_red, sum)
+
+agg1_ofe_A_rn_red<-aggregate(cbind(Runoff,ET, `Lateral subsurface flow`, `Deep perc.`)~OFE+Year+Scenario+Group+
+                  Res_layer+Slope_steepness+Slope_length+Slope_depth+Treatment,df_A_rn_red, sum)
+
+
+# agg_drain_depth<-aggregate(cbind(`Total Soil water`,`Depth_to_drainable_zone`)~Scenario+Group+
+                  # Res_layer+Slope_steepness+Slope_length,df, mean)
+
+agg2_ofe_A_rn_red<-aggregate(cbind(Runoff,ET, `Lateral subsurface flow`, `Deep perc.`)~OFE+Scenario+Group+
+                  Res_layer+Slope_steepness+Slope_length+Slope_depth+Treatment, agg1_ofe_A_rn_red,mean)
+
+agg1_piv_ofe_A_rn_red<-pivot_longer(agg2_ofe_A_rn_red, cols = c("Runoff","ET","Lateral subsurface flow", "Deep perc."), names_to = "Wat_vars", values_to = "Water Depth (mm)")
+
+agg1_piv_ofe_A_rn_red$Wat_vars<-factor(agg1_piv_ofe_A_rn_red$Wat_vars, levels = c("ET","Runoff","Lateral subsurface flow", "Deep perc."))
+
+agg1_piv_ofe_A_rn_red_ro<-agg1_piv_ofe_A_rn_red[agg1_piv_ofe_A_rn_red$Wat_vars=="Runoff",][,c(1,4:10)]
+
+
+piv_piv_runoff<-pivot_wider(agg1_piv_ofe_A_rn_red_ro, values_from = "Water Depth (mm)", names_from = "Treatment", id_expand = FALSE)
+
+piv_piv_runoff$percent_red <-round(100 * ( piv_piv_runoff$No_treatment -  piv_piv_runoff$RG_OFE3 )/ piv_piv_runoff$No_treatment ,2)
+
+#### Tile graph ####
+
+cols_B<-c("#fdd49e","#fc8d59","#ef6548","#d7301f","#990000")
+
+breaks<-c(0,5, 10, 15,20)
+ggplot(piv_piv_runoff, aes(x = Slope_steepness,y = Slope_length, fill =  percent_red))+
+  geom_tile()+
+scale_fill_gradientn(colours = cols_B, breaks = breaks)+
+  # geom_bar(position = "dodge", stat = "identity", color = "black")+
+# scale_fill_manual(values=len_col_3)+  
+ geom_text(aes( label = round(percent_red,2)))+
+  facet_wrap(~OFE)+
+  # facet_grid(rows = vars(OFE), cols = vars(Wat_vars))+
+  # scale_y_continuous(limits = c(0,2500), n.breaks = 7, expand = c(0,0))+
+  # facet_wrap(~Slope_steepness+Res_layer, nrow = 3, scales = "free")+ 
+  my_custom_themes+
+    theme(panel.spacing = unit(2, "lines"))+
+  theme(strip.text = element_text(size = 21))+
+  theme(axis.title.x = element_text(size = 30))+
+  theme(axis.text.x.bottom = element_text(angle = 15, size = 25),
+        # legend.title = element_text(size = 23),
+        legend.text = element_text(size = 30),
+        legend.direction = "vertical",
+        legend.position = "right")
+# ggsave('runoff_reduction_3ofe_separately_vary_length_steepness2_Tile_with_RG.eps', width = 16, height = 10)
+
+```
+
+
+### Understanding the response to different soil depth
+
+```{r, echo=FALSE, include=FALSE}
+
+Scens2<-c("Sce31", "Sce32","Sce33",
+         "Sce37", "Sce38","Sce39")
+
+df_B <-df[df$Scenario%in%Scens2,]
+
+#### summarizing #######
+
+agg0<-aggregate(cbind(`Rain+snowmelt`)~Year+Scenario+Group,df_B, sum)
+
+agg1_ofe_B<-aggregate(cbind(Runoff,ET, `Lateral subsurface flow`, `Deep perc.`)~OFE+Year+Scenario+Group+
+                  Res_layer+Slope_steepness+Slope_length+Depth+Slope_depth,df_B, sum)
+
+
+# agg_drain_depth<-aggregate(cbind(`Total Soil water`,`Depth_to_drainable_zone`)~Scenario+Group+
+                  # Res_layer+Slope_steepness+Slope_length,df, mean)
+
+agg2_ofe_B<-aggregate(cbind(Runoff,ET, `Lateral subsurface flow`, `Deep perc.`)~OFE+Scenario+Group+
+                  Res_layer+Slope_steepness+Slope_length+Depth+Slope_depth, agg1_ofe_B,mean)
+
+agg1_piv_ofe_B<-pivot_longer(agg2_ofe_B, cols = c("Runoff","ET","Lateral subsurface flow", "Deep perc."), names_to = "Wat_vars", values_to = "Water Depth (mm)")
+#agg1_piv$OFE<-as.factor(agg1_piv$OFE)
+
+# agg_depth_piv<-pivot_longer(agg_drain_depth, cols = c("Total Soil water","Depth_to_drainable_zone"), names_to = "Wat_vars", values_to = "Water Depth (mm)")
+#agg1_piv$OFE<-as.factor(agg1_piv$OFE)
+
+# final_pivs <-rbind(agg1_piv, agg_depth_piv)
+
+agg1_piv_ofe_B$Slope_length<-as.factor(agg1_piv_ofe_B$Slope_length)
+
+agg1_piv_ofe_B$Wat_vars<-factor(agg1_piv_ofe_B$Wat_vars, levels = c("ET","Runoff","Lateral subsurface flow", "Deep perc."))
+
+ggplot(agg1_piv_ofe_B, aes(fill = Slope_length, x = OFE, `Water Depth (mm)`), check_overlap = TRUE)+geom_bar(position = "dodge", stat = "identity", color = "black")+
+# scale_fill_manual(values=len_col_3)+  
+  # geom_text(aes(fill = Slope_length, x = Wat_vars, y =`Water Depth (mm)`,  label = `Water Depth (mm)`, angle = 90), 
+             # position = position_dodge(0.9))+
+  facet_grid(rows = vars(Depth), cols = vars(Wat_vars), scales = "free")+
+  scale_y_continuous(limits = c(0,800), n.breaks = 5, expand = c(0,0))+
+  # facet_wrap(~Slope_steepness+Res_layer, nrow = 3, scales = "free")+ 
+  my_custom_themes+
+    theme(panel.spacing = unit(2, "lines"))+
+  theme(strip.text = element_text(size = 22))+
+  theme(axis.title.x = element_text(size = 30))+
+  theme(axis.text.x.bottom = element_text(angle = 0, size = 25),
+        legend.text = element_text(size =30),
+        legend.direction = "vertical",
+        legend.position = c(0.96, 0.95))
+
+# ggsave('water_balance_3ofe_separately_vary_soildepth.eps', width = 16, height = 10)
+
+
+
+```
+
+
+### Only looking at Runoff 
+
+```{r, echo=FALSE, include=FALSE}
+
+
+agg1_piv_ofe_B_runoff<-agg1_piv_ofe_B[agg1_piv_ofe_B$Wat_vars=="Runoff",]
+
+ggplot(agg1_piv_ofe_B_runoff, aes(fill = Slope_length, x = OFE, `Water Depth (mm)`), check_overlap = TRUE)+geom_bar(position = "dodge", stat = "identity", color = "black")+
+# scale_fill_manual(values=len_col_3)+  
+  # geom_text(aes(fill = Slope_length, x = Wat_vars, y =`Water Depth (mm)`,  label = `Water Depth (mm)`, angle = 90), 
+             # position = position_dodge(0.9))+
+  scale_y_continuous(limits = c(0,400), n.breaks = 5, expand = c(0,0))+
+  facet_grid(rows = vars(Depth), cols = vars(Wat_vars))+
+  # facet_wrap(~Slope_steepness+Res_layer, nrow = 3, scales = "free")+ 
+  my_custom_themes+
+  theme(panel.spacing = unit(2, "lines"))+
+  theme(strip.text = element_text(size = 30))+
+  theme(axis.title.x = element_text(size =25))+
+  theme(axis.text.x.bottom = element_text(angle = 0, size = 25),
+        legend.text = element_text(size = 30),
+        legend.position = c(0.45, 0.985))
+
+# ggsave("only_runoff_change.eps", width = 12, height = 10)
+
+Scens3<-c("Sce31", "Sce32","Sce39")
+
+### only aggregated value for three scenarios ###
+agg1_piv_ofe_B_runoff_2<-agg1_piv_ofe_B_runoff[agg1_piv_ofe_B_runoff$Scenario%in%Scens3,]
+
+
+#### This one has yearly values for three scenarios
+
+agg1_ofe_B_3scena <-agg1_ofe_B[agg1_ofe_B$Scenario%in%Scens3,]
+
+### Ofe scenario combination 
+
+agg1_ofe_B_3scena$ofe_scena <-paste0(agg1_ofe_B_3scena$Scenario, "_",agg1_ofe_B_3scena$OFE)
+
+comb<-c("Sce31_1", "Sce31_3","Sce39_3")
+
+agg1_ofe_B_3scena_filt <-agg1_ofe_B_3scena[agg1_ofe_B_3scena$ofe_scena%in%comb,]
+
+#### Plot year by year runoff ##########
+
+ggplot(agg1_ofe_B_3scena_filt, aes( x = as.factor(as.numeric(Year)), Runoff, group = ofe_scena, color = ofe_scena))+
+  geom_point()+geom_line()+
+# scale_fill_manual(values=len_col_3)+  
+  # geom_text(aes(fill = Slope_length, x = Wat_vars, y =`Water Depth (mm)`,  label = `Water Depth (mm)`, angle = 90), 
+             # position = position_dodge(0.9))+
+  # facet_grid(rows = vars(Depth), cols = vars(Wat_vars), scales = "free")+
+  # facet_wrap(~Slope_steepness+Res_layer, nrow = 3, scales = "free")+ 
+  my_custom_themes+
+  ylab("Runoff (mm)")+
+  xlab("Year")+
+  scale_y_continuous(limits = c(0,800), n.breaks = 5, expand = c(0,0))+
+  theme(strip.text = element_text(size = 15))+
+  theme(axis.title.x = element_text(size = 15))+
+  theme(axis.text.x.bottom = element_text(angle = 0, size = 20),
+        legend.text = element_blank(),
+        # legend.text = element_text(size = 20),
+        legend.direction = "vertical",
+        legend.position = "none")  #c(0.30, 0.98)
+
+# ggsave("year_by_year_runoff.eps", height = 6, width = 8)
+
+# ggplot(agg1_piv_ofe_B_runoff_2, aes(fill = Slope_length, x = OFE, `Water Depth (mm)`), check_overlap = TRUE)+
+#   geom_bar( position = "dodge", stat = "identity", color = "black")+
+# # scale_fill_manual(values=len_col_3)+  
+#   # geom_text(aes(fill = Slope_length, x = Wat_vars, y =`Water Depth (mm)`,  label = `Water Depth (mm)`, angle = 90), 
+#              # position = position_dodge(0.9))+
+#   facet_wrap(~Depth, scales = "free_x")+
+#   # facet_grid(rows = vars(Depth), cols = vars(Wat_vars), scales = "free", space = "free")+
+#   # facet_wrap(~Slope_steepness+Res_layer, nrow = 3, scales = "free")+ 
+#   my_custom_themes+
+#   theme(strip.text = element_text(size = 15))+
+#   theme(axis.title.x = element_text(size = 15))+
+#   theme(axis.text.x.bottom = element_text(angle = 0, size = 20),
+#         legend.text = element_text(size = 20),
+#         legend.position = c(0.96, 0.95))
+
+#### summarizing #######
+
+agg0<-aggregate(cbind(`Rain+snowmelt`)~Year+Scenario+Group,df_B, sum)
+
+agg1_ofe_B<-aggregate(cbind(Runoff,ET, `Lateral subsurface flow`, `Deep perc.`)~OFE+Year+Scenario+Group+
+                  Res_layer+Slope_steepness+Slope_length+Depth+Slope_depth,df_B, sum)
+
+
+# agg_drain_depth<-aggregate(cbind(`Total Soil water`,`Depth_to_drainable_zone`)~Scenario+Group+
+                  # Res_layer+Slope_steepness+Slope_length,df, mean)
+
+agg2_ofe_B<-aggregate(cbind(Runoff,ET, `Lateral subsurface flow`, `Deep perc.`)~OFE+Scenario+Group+
+                  Res_layer+Slope_steepness+Slope_length+Depth+Slope_depth, agg1_ofe_B,mean)
+
+agg1_piv_ofe_B<-pivot_longer(agg2_ofe_B, cols = c("Runoff","ET","Lateral subsurface flow", "Deep perc."), names_to = "Wat_vars", values_to = "Water Depth (mm)")
+#agg1_piv$OFE<-as.factor(agg1_piv$OFE)
+
+# agg_depth_piv<-pivot_longer(agg_drain_depth, cols = c("Total Soil water","Depth_to_drainable_zone"), names_to = "Wat_vars", values_to = "Water Depth (mm)")
+#agg1_piv$OFE<-as.factor(agg1_piv$OFE)
+
+# final_pivs <-rbind(agg1_piv, agg_depth_piv)
+
+agg1_piv_ofe_B$Slope_length<-as.factor(agg1_piv_ofe_B$Slope_length)
+
+
+
+```
+
+### Changing Depth and Anisotropy with same length and steepness
+
+
+```{r, include=FALSE, echo = FALSE}
+Scens_55<-c("Sce75", "Sce76","Sce77","Sce78", "Sce79","Sce80",
+            "Sce81", "Sce82","Sce83","Sce84", "Sce85","Sce86",
+            "Sce87", "Sce88","Sce89","Sce90", "Sce91","Sce92",
+            "Sce93","Sce94")
+
+df_B2 <-df[df$Scenario%in%Scens_55,]
+
+agg1_ofe_B2<-aggregate(cbind(Runoff,ET, `Lateral subsurface flow`, `Deep perc.`)~OFE+Year+Scenario+
+                  Depth+Anisotropy+SoilK,df_B2, sum)
+
+
+# agg_drain_depth<-aggregate(cbind(`Total Soil water`,`Depth_to_drainable_zone`)~Scenario+Group+
+                  # Res_layer+Slope_steepness+Slope_length,df, mean)
+
+agg2_ofe_B2<-aggregate(cbind(Runoff,ET, `Lateral subsurface flow`, `Deep perc.`)~OFE+Scenario+
+                  Depth+Anisotropy+SoilK, agg1_ofe_B2,mean)
+
+agg1_piv_ofe_B2<-pivot_longer(agg2_ofe_B2, cols = c("Runoff","ET","Lateral subsurface flow", "Deep perc."), names_to = "Wat_vars", values_to = "Water Depth (mm)")
+#agg1_piv$OFE<-as.factor(agg1_piv$OFE)
+
+# agg_depth_piv<-pivot_longer(agg_drain_depth, cols = c("Total Soil water","Depth_to_drainable_zone"), names_to = "Wat_vars", values_to = "Water Depth (mm)")
+#agg1_piv$OFE<-as.factor(agg1_piv$OFE)
+
+# final_pivs <-rbind(agg1_piv, agg_depth_piv)
+
+k_ord<-c("5","10","15","21","25")
+
+agg1_piv_ofe_B2$Anisotropy<-as.factor(agg1_piv_ofe_B2$Anisotropy)
+
+agg1_piv_ofe_B2$SoilK<-factor(agg1_piv_ofe_B2$SoilK, levels = k_ord)
+
+agg1_piv_ofe_B2$Wat_vars<-factor(agg1_piv_ofe_B2$Wat_vars, levels = c("ET","Runoff","Lateral subsurface flow", "Deep perc."))
+
+ggplot(agg1_piv_ofe_B2, aes(fill = Depth, x = OFE, `Water Depth (mm)`), check_overlap = TRUE)+geom_bar(position = "dodge", stat = "identity", color = "black")+
+# scale_fill_manual(values=len_col_3)+  
+  # geom_text(aes(fill = Slope_length, x = Wat_vars, y =`Water Depth (mm)`,  label = `Water Depth (mm)`, angle = 90), 
+             # position = position_dodge(0.9))+
+  facet_grid(rows = vars(SoilK), cols = vars(Wat_vars), scales = "free")+
+  scale_y_continuous(limits = c(0,800), n.breaks = 5, expand = c(0,0))+
+  # facet_wrap(~Slope_steepness+Res_layer, nrow = 3, scales = "free")+ 
+  my_custom_themes+
+    theme(panel.spacing = unit(2, "lines"))+
+  theme(strip.text = element_text(size = 22))+
+  theme(axis.title.x = element_text(size = 30))+
+  theme(axis.text.x.bottom = element_text(angle = 0, size = 25),
+        legend.text = element_text(size =30),
+        legend.direction = "vertical",
+        legend.position = c(0.96, 0.95))
+
+# ggsave('water_balance_3ofe_separately_vary_depthxaniso.eps', width = 16, height = 10)
+
+
+
+```
+#### Create a surface plot
+
+```{r, include=FALSE}
+library(reshape2)
+
+agg1_piv_ofe_B2_runoff<-agg1_piv_ofe_B2[agg1_piv_ofe_B2$Wat_vars=="Runoff",]
+
+# agg1_piv_ofe_A_runoff<-separate(agg1_piv_ofe_B2, "Slope_length", into = c("slp", "in"), sep = " m")
+# agg1_piv_ofe_A_runoff$slopelen2<-as.numeric(unlist(str_split(agg1_piv_ofe_A_runoff$Slope_length, " m"))[1])
+# agg1_piv_ofe_A_runoff$slp <-as.numeric(agg1_piv_ofe_A_runoff$slp)
+
+
+mydata_matrix2 <- acast(agg1_piv_ofe_B2_runoff, SoilK~Depth, value.var = "Water Depth (mm)",mean)
+
+
+ps2<-plot_ly(z = mydata_matrix2,
+        x = colnames(mydata_matrix2), 
+        y = row.names(mydata_matrix2),
+        type = "surface")%>%
+  layout(scene = list(xaxis = list(title = "Depth (m)"), yaxis = list(title = "K (mm/hr)"),zaxis = list(title = "Runoff (mm)")))
+
+
+```
+
+
+### Behaviour of Pavement 
+
+```{r, echo=FALSE, include=FALSE}
+
+# Sce_pv_a<-c("Sce40", "Sce41", "Sce42",
+#             "Sce46", "Sce47", "Sce48", "Sce101")
+
+Sce_pv_a<-c("Sce111", "Sce112", "Sce113",
+            "Sce114", "Sce115", "Sce116", "Sce101")
+
+Sce_pv_b<-c("Sce114", "Sce101")
+
+df_pv <- df[df$Scenario%in%Sce_pv_b,]
+
+Scens_pv<-c("Sce32","Sce33")
+
+df_pv_cnt <-df[df$Scenario%in%Scens_pv,]
+
+df_pv<-rbind(df_pv, df_pv_cnt)
+#### summarizing #######
+
+agg0_pv<-aggregate(cbind(`Rain+snowmelt`)~Year+Scenario+Group,df_pv, sum)
+
+agg1_ofe_pv<-aggregate(cbind(Runoff,ET, `Lateral subsurface flow`, `Deep perc.`)~OFE+Year+Scenario+
+                  Res_layer+Slope_steepness+Slope_length+Slope_depth+Depth+Treatment,df_pv, sum)
+
+
+# agg_drain_depth<-aggregate(cbind(`Total Soil water`,`Depth_to_drainable_zone`)~Scenario+Group+
+                  # Res_layer+Slope_steepness+Slope_length,df, mean)
+
+agg2_ofe_pv<-aggregate(cbind(Runoff,ET, `Lateral subsurface flow`, `Deep perc.`)~OFE+Scenario+
+                  Res_layer+Slope_steepness+Slope_length+Slope_depth+Depth+Treatment, agg1_ofe_pv,mean)
+
+agg1_piv_ofe_pv<-pivot_longer(agg2_ofe_pv, cols = c("Runoff","ET","Lateral subsurface flow", "Deep perc."), names_to = "Wat_vars", values_to = "Water Depth (mm)")
+
+agg1_piv_ofe_pv$Wat_vars<-factor(agg1_piv_ofe_pv$Wat_vars, levels = c("ET","Runoff","Lateral subsurface flow", "Deep perc."))
+#agg1_piv$OFE<-as.factor(agg1_piv$OFE)
+
+# agg_depth_piv<-pivot_longer(agg_drain_depth, cols = c("Total Soil water","Depth_to_drainable_zone"), names_to = "Wat_vars", values_to = "Water Depth (mm)")
+#agg1_piv$OFE<-as.factor(agg1_piv$OFE)
+
+# final_pivs <-rbind(agg1_piv, agg_depth_piv)
+
+agg1_piv_ofe_pv$Slope_length<-as.factor(agg1_piv_ofe_pv$Slope_length)
+
+ggplot(agg1_piv_ofe_pv, aes(fill = Slope_length, x = OFE, `Water Depth (mm)`), check_overlap = TRUE)+geom_bar(position = "dodge", stat = "identity", color = "black")+
+# scale_fill_manual(values=len_col_3)+  
+  geom_text(aes(fill = Slope_length, x = OFE, y =`Water Depth (mm)`+1,  label = round(`Water Depth (mm)`,1), angle =  90), 
+            position = position_dodge(0.9))+
+  facet_grid(rows = vars(Treatment), cols = vars(Wat_vars))+
+  scale_y_continuous(limits = c(0,1200), n.breaks = 7, expand = c(0,0))+
+  # facet_wrap(~Slope_steepness+Res_layer, nrow = 3, scales = "free")+ 
+  my_custom_themes+
+    theme(panel.spacing = unit(2, "lines"))+
+  theme(strip.text = element_text(size = 21))+
+  theme(axis.title.x = element_text(size = 30))+
+  theme(axis.text.x.bottom = element_text(angle = 0, size = 25),
+        # legend.title = element_text(size = 23),
+        legend.text = element_text(size = 30),
+        legend.direction = "vertical",
+        legend.position = c(0.70, 0.98))
+
+
+
+# ggsave("pavement_behaviour_3OFE2_drainage.eps", height = 10, width = 12)
+
+#### only single slope length 200
+
+
+agg1_piv_ofe_pv_sl<-agg1_piv_ofe_pv[agg1_piv_ofe_pv$Slope_length=="200 m",]
+
+levs_b<-c("No_treatment","Pvmnt_OFE1","Drainage_OFE1")
+labs_b<-c("No treatment","Pavement OFE1","Drainage OFE1")
+
+agg1_piv_ofe_pv_sl$Treatment <-factor(agg1_piv_ofe_pv_sl$Treatment, levels = levs_b, labels = labs_b)
+library(ggpattern)
+
+ggplot(agg1_piv_ofe_pv_sl, aes(fill = Treatment, x = OFE, `Water Depth (mm)`), check_overlap = TRUE)+geom_bar(position = "dodge", stat = "identity", color = "black")+
+# scale_fill_manual(values=len_col_3)+  
+  geom_text(aes(fill = Treatment,  x = OFE, y =`Water Depth (mm)`-30,  label = round(`Water Depth (mm)`,0), angle =  90), 
+            position = position_dodge(0.9))+
+  # facet_grid(rows = vars(Treatment), cols = vars(Wat_vars))+
+  scale_y_continuous(n.breaks = 5, expand = c(0,0))+
+ facet_wrap(~Wat_vars, scales = "free")+  #, nrow = 3, scales = "free"
+  my_custom_themes+
+  
+    ggh4x::facetted_pos_scales(y = list(
+  Wat_vars == "ET" ~ scale_y_continuous(limits = c(0, 800)),
+  Wat_vars == "Runoff" ~ scale_y_continuous(limits = c(0, 900)),
+  Wat_vars == "Lateral subsurface flow" ~ scale_y_continuous(limits = c(0, 500)),
+  Wat_vars == "Deep perc." ~ scale_y_continuous(limits = c(0, 800))))+
+  
+    theme(panel.spacing = unit(2, "lines"))+
+  theme(strip.text = element_text(size = 21))+
+  theme(axis.title.x = element_text(size = 30))+
+  theme(axis.text.x.bottom = element_text(angle = 0, size = 25),
+        # legend.title = element_text(size = 23),
+        legend.text = element_text(size = 30),
+        legend.direction = "vertical",
+        legend.position = "right")
+# ggsave("pavement_behaviour_3OFE2_drainage_lll_impr_paves.eps", height = 10, width = 14)
+# ggsave("pavement_behaviour_3OFE2_drainage_sing_length.eps", height = 10, width = 14)
+
+```
+#### Scenario 114 ##########
+```{r, echo=FALSE}
+
+df_pv_sce114<-df_pv[df_pv$Scenario=="Sce114",]
+
+df_pv_sce114_agg<-aggregate(cbind(Runoff,Es,Ep,Er,`Lateral subsurface flow`,`Deep perc.`)~OFE+J+Scenario, df_pv_sce114,mean)
+
+df_pv_sce114_agg_pv<-pivot_longer(df_pv_sce114_agg, cols = c("Runoff","Es","Ep", "Er", "Lateral subsurface flow", "Deep perc."), names_to = "Wat_vars", values_to = "Water Depth (mm)")
+df_pv_sce114_agg_pv$OFE<-as.factor(df_pv_sce114_agg_pv$OFE)
+ggplot(df_pv_sce114_agg_pv, aes(J, `Water Depth (mm)`, color = OFE))+geom_line()+
+  facet_wrap(~Wat_vars)
+#ggsave("pavement_behaviour_3OFE2_average_daily_paves.eps", height = 10, width = 14)
+
+```
+
+
+
+### Behaviour_Pavement_plus_Raingarden
+
+```{r, echo=FALSE, include=FALSE}
+# df_pv_rg <- df[df$SoilK=="Pvmnt",]
+
+Scens_pv2<-c("Sce32", "Sce111","Sce120"
+             # ,"Sce116","Sce117","Sce118","Sce119","Sce51"
+             )
+
+
+# Scens_pv2<-c("Sce33", "Sce114","Sce115","Sce116",
+#             "Sce117","Sce118","Sce119","Sce51")
+
+ords<-c("No_treatment",'Pvmnt_OFE1',"PV_OFE1_RG_OFE2")
+
+lavs<-c("No treatment",'Pvmnt OFE1',"Pvmnt OFE1 w. RG OFE2")
+
+df_pv_rg <-df[df$Scenario%in%Scens_pv2,]
+
+# df_pv<-rbind(df_pv, df_pv_cnt)
+#### summarizing #######
+
+agg0_pv_rg<-aggregate(cbind(`Rain+snowmelt`)~Year+Scenario+Group,df_pv_rg, sum)
+
+agg1_ofe_pv_rg<-aggregate(cbind(Runoff,ET, `Lateral subsurface flow`, `Deep perc.`)~OFE+Year+Scenario+Group+
+                  Res_layer+Slope_steepness+Slope_length+Slope_depth+Depth+Treatment,df_pv_rg, sum)
+
+
+# agg_drain_depth<-aggregate(cbind(`Total Soil water`,`Depth_to_drainable_zone`)~Scenario+Group+
+                  # Res_layer+Slope_steepness+Slope_length,df, mean)
+
+agg2_ofe_pv_rg<-aggregate(cbind(Runoff,ET, `Lateral subsurface flow`, `Deep perc.`)~OFE+Scenario+Group+
+                  Res_layer+Slope_steepness+Slope_length+Slope_depth+Depth+Treatment, agg1_ofe_pv_rg,mean)
+
+agg1_piv_ofe_pv_rg<-pivot_longer(agg2_ofe_pv_rg, cols = c("Runoff","ET","Lateral subsurface flow", "Deep perc."), names_to = "Wat_vars", values_to = "Water Depth (mm)")
+
+agg1_piv_ofe_pv_rg$Wat_vars<-factor(agg1_piv_ofe_pv_rg$Wat_vars, levels = c("ET","Runoff","Lateral subsurface flow", "Deep perc."))
+#agg1_piv$OFE<-as.factor(agg1_piv$OFE)
+
+# agg_depth_piv<-pivot_longer(agg_drain_depth, cols = c("Total Soil water","Depth_to_drainable_zone"), names_to = "Wat_vars", values_to = "Water Depth (mm)")
+#agg1_piv$OFE<-as.factor(agg1_piv$OFE)
+
+# final_pivs <-rbind(agg1_piv, agg_depth_piv)
+
+agg1_piv_ofe_pv_rg$Slope_length<-as.factor(agg1_piv_ofe_pv_rg$Slope_length)
+
+agg1_piv_ofe_pv_rg$Treatment<-factor(agg1_piv_ofe_pv_rg$Treatment, levels = ords, labels = lavs)
+library(stringr)
+ggplot(agg1_piv_ofe_pv_rg, aes(fill = Treatment, x = OFE, `Water Depth (mm)`), check_overlap = TRUE)+geom_bar(position = "dodge", stat = "identity", color = "black")+
+# scale_fill_manual(values=len_col_3)+  
+  geom_text(aes(fill = Treatment, x = OFE, y =`Water Depth (mm)`+1,  label = round(`Water Depth (mm)`,1), angle =  90), 
+            position = position_dodge(0.9))+
+  facet_wrap(~Wat_vars)+
+  # facet_grid(rows = vars(Treatment), cols = vars(Wat_vars))+
+  scale_y_continuous(limits = c(0,1200), n.breaks = 7, expand = c(0,0))+
+  # facet_wrap(~Slope_steepness+Res_layer, nrow = 3, scales = "free")+ 
+  my_custom_themes+
+    theme(panel.spacing = unit(2, "lines"))+
+  theme(strip.text = element_text(size = 21))+
+  theme(axis.title.x = element_text(size = 30))+
+  # theme(legend.key.height=unit(2, "cm")
+  #        # legend.key.width=unit(5, "cm")
+  #       )+
+  
+  theme(axis.text.x.bottom = element_text(angle = 0, size = 25),
+        # legend.title = element_text(size = 23),
+        legend.text = element_text(size = 25),
+        legend.direction = "vertical",
+        # legend.position = "bottom")
+        legend.position = c(0.94, 0.45))
+
+# ggsave("pavementplus_raingarden_behaviour_3OFE_semi.eps", height = 10, width = 12)
+
+```
+
+##### Behaviour of Raingarden in different HSI classes
+
+```{r, include=FALSE, echo=FALSE}
+
+# Scens_rn_20<-c("Sce102","Sce97","Sce96",
+            # "Sce98","Sce100","Sce110")
+
+Scens_rn_20<-c("Sce102","Sce55","Sce39",
+            "Sce98","Sce122","Sce121")
+
+# Scens_rn_20<-c("Sce103","Sce104","Sce105",
+#             "Sce106","Sce107","Sce108")
+
+df_rg2 <-df[df$Scenario%in%Scens_rn_20,]
+
+# df_pv<-rbind(df_pv, df_pv_cnt)
+#### summarizing #######
+
+agg0_rg2<-aggregate(cbind(`Rain+snowmelt`)~Year+Scenario+Group,df_rg2, sum)
+
+agg1_ofe_rg2<-aggregate(cbind(Runoff,ET, `Lateral subsurface flow`, `Deep perc.`)~OFE+Year+Scenario+Group+
+                  Res_layer+Slope_steepness+Slope_length+Slope_depth+Depth+Treatment+Remarks,df_rg2, sum)
+
+
+# agg_drain_depth<-aggregate(cbind(`Total Soil water`,`Depth_to_drainable_zone`)~Scenario+Group+
+                  # Res_layer+Slope_steepness+Slope_length,df, mean)
+
+agg2_ofe_rg2<-aggregate(cbind(Runoff,ET, `Lateral subsurface flow`, `Deep perc.`)~OFE+Scenario+Group+
+                  Res_layer+Slope_steepness+Slope_length+Slope_depth+Depth+Treatment+Remarks, agg1_ofe_rg2,mean)
+
+agg1_piv_ofe_rg2<-pivot_longer(agg2_ofe_rg2, cols = c("Runoff","ET","Lateral subsurface flow", "Deep perc."), names_to = "Wat_vars", values_to = "Water Depth (mm)")
+
+agg1_piv_ofe_rg2$Wat_vars<-factor(agg1_piv_ofe_rg2$Wat_vars, levels = c("ET","Runoff","Lateral subsurface flow", "Deep perc."))
+#agg1_piv$OFE<-as.factor(agg1_piv$OFE)
+
+# agg_depth_piv<-pivot_longer(agg_drain_depth, cols = c("Total Soil water","Depth_to_drainable_zone"), names_to = "Wat_vars", values_to = "Water Depth (mm)")
+#agg1_piv$OFE<-as.factor(agg1_piv$OFE)
+
+# final_pivs <-rbind(agg1_piv, agg_depth_piv)
+
+agg1_piv_ofe_rg2$Slope_length<-as.factor(agg1_piv_ofe_rg2$Slope_length)
+
+ggplot(agg1_piv_ofe_rg2, aes(fill = Treatment, x = OFE, `Water Depth (mm)`), check_overlap = TRUE)+geom_bar(position = "dodge", stat = "identity", color = "black")+
+# scale_fill_manual(values=len_col_3)+  
+  geom_text(aes( x = OFE, y =`Water Depth (mm)`+1,fill = Treatment,  label = round(`Water Depth (mm)`,1), angle =  90), 
+            position = position_dodge(0.9))+
+  # facet_wrap(~Wat_vars)+
+  facet_grid(rows = vars(Remarks), cols = vars(Wat_vars))+
+  scale_y_continuous(limits = c(0,1200), n.breaks = 7, expand = c(0,0))+
+  # facet_wrap(~Slope_steepness+Res_layer, nrow = 3, scales = "free")+ 
+  my_custom_themes+
+    theme(panel.spacing = unit(2, "lines"))+
+  theme(strip.text = element_text(size = 21))+
+  theme(axis.title.x = element_text(size = 30))+
+  theme(axis.text.x.bottom = element_text(angle = 0, size = 25),
+        # legend.title = element_text(size = 23),
+        legend.text = element_text(size = 25),
+        legend.direction = "vertical",
+        legend.position = "right")
+        # legend.position = c(0.70, 0.98))
+
+# ggsave("HSI_Classes_raingarden_behaviour_3OFE.eps", height = 10, width = 12)
+
+### Only relevant location and water balance component ####
+
+
+rel_var <- agg1_piv_ofe_rg2[agg1_piv_ofe_rg2$Wat_vars=="Runoff",]
+
+rel_loc<-rel_var[((rel_var$OFE==1)&(rel_var$Remarks == "Low_HSI_1"))|
+                ((rel_var$OFE==1)&(rel_var$Remarks == "Moderate_HSI_1"))|
+                 ((rel_var$OFE==3)&(rel_var$Remarks == "High_HSI_1")),]
+
+rel_loc$Remarks<-factor(rel_loc$Remarks, levels = c("Low_HSI_1",
+                                                        "Moderate_HSI_1",
+                                                        "High_HSI_1"),
+                          labels = c("Lowest HSI", "Median HSI","Highest HSI"))
+
+rel_loc$Treatment<-factor(rel_loc$Treatment, levels = c("No_treatment",
+                                                        "Rain_garden_OFE1",
+                                                        "Rain_garden_OFE3"),
+                          labels = c("No_treatment", "Rain garden", "Rain garden"))
+
+
+ggplot(rel_loc, aes(fill = Treatment, x = Wat_vars, `Water Depth (mm)`), check_overlap = TRUE)+geom_bar(position = "dodge", stat = "identity", color = "black")+
+# scale_fill_manual(values=len_col_3)+  
+  geom_text(aes(y =`Water Depth (mm)`,fill = Treatment,  label = round(`Water Depth (mm)`,1), angle =  0), 
+            position = position_dodge(0.9), size = 8)+
+  facet_wrap(~Remarks, scales = "free_y")+
+  # facet_grid(rows = vars(Remarks), cols = vars(Wat_vars))+
+  # scale_y_continuous(limits = c(0,1200), n.breaks = 7, expand = c(0,0))+
+  # facet_wrap(~Slope_steepness+Res_layer, nrow = 3, scales = "free")+ 
+  
+      ggh4x::facetted_pos_scales(y = list(
+  Remarks == "Lowest HSI" ~ scale_y_continuous(limits = c(0, 10), expand = c(0,0)),
+  Remarks == "Median HSI" ~ scale_y_continuous(limits = c(0, 500), expand = c(0,0)),
+  Remarks == "Highest HSI" ~ scale_y_continuous(limits = c(0, 500), expand = c(0,0))))+
+  
+  ylab("Runoff (mm)")+
+  my_custom_themes+
+    theme(panel.spacing = unit(2, "lines"))+
+  theme(strip.text = element_text(size = 21))+
+  # theme(axis.title.x = element_text(size = 30))+
+  theme(axis.text.x.bottom = element_blank(),
+    # axis.text.x.bottom = element_text(angle = 0, size = 25),
+        # legend.title = element_text(size = 23),
+        legend.text = element_text(size = 25),
+        legend.direction = "vertical",
+        legend.position = "right")
+        # legend.position = c(0.70, 0.98))
+
+
+
+  # Wat_vars == "Deep perc." ~ scale_y_continuous(limits = c(0, 800))))+
+
+
+
+# ggsave("HSI_Classes_raingarden_behaviour_rel_OFEs.eps", height = 10, width = 12)
+
+#### Only treatment in these three areas... 
+rel_loc_notreat <- rel_loc[rel_loc$Treatment=="No_treatment",]
+ggplot(rel_loc_notreat, aes(x = Wat_vars, `Water Depth (mm)`), check_overlap = TRUE)+geom_bar(position = "dodge", stat = "identity", color = "black")+
+# scale_fill_manual(values=len_col_3)+  
+  # geom_text(aes(y =`Water Depth (mm)`,  label = round(`Water Depth (mm)`,0), angle =  0), 
+  #           position = position_dodge(0.9), size = 8)+
+  facet_wrap(~Remarks, scales = "free_y")+
+  # facet_grid(rows = vars(Remarks), cols = vars(Wat_vars))+
+  # scale_y_continuous(limits = c(0,1200), n.breaks = 7, expand = c(0,0))+
+  # facet_wrap(~Slope_steepness+Res_layer, nrow = 3, scales = "free")+ 
+      ggh4x::facetted_pos_scales(y = list(
+  Remarks == "Lowest HSI" ~ scale_y_continuous(limits = c(0, 10), expand = c(0,0)),
+  Remarks == "Median HSI" ~ scale_y_continuous(limits = c(0, 500), expand = c(0,0)),
+  Remarks == "Highest HSI" ~ scale_y_continuous(limits = c(0, 500), expand = c(0,0))))+
+  
+  ylab("Runoff (mm)")+
+  my_custom_themes+
+    theme(panel.spacing = unit(2, "lines"))+
+  theme(strip.text = element_text(size = 21))+
+  # theme(axis.title.x = element_text(size = 30))+
+  theme(axis.text.x.bottom = element_blank(),
+    # axis.text.x.bottom = element_text(angle = 0, size = 25),
+        # legend.title = element_text(size = 23),
+        legend.text = element_text(size = 25),
+        legend.direction = "vertical",
+        legend.position = "right")
+        # legend.position = c(0.70, 0.98))
+
+# ggsave("HSI_Classes_behaviour_rel_OFEs.eps", height = 10, width = 12)
+
+
+  # Wat_vars == "Deep perc." ~ scale_y_continuous(limits = c(0, 800))))+
+
+
+
+
+
+
+##### Annual Runoff in three HSI classes #################
+agg1_ofe_rg2$Year<-as.numeric(agg1_ofe_rg2$Year)
+
+### without rain garden treatment ######## 
+
+agg1_ofe_rg2_A<-agg1_ofe_rg2[agg1_ofe_rg2$Treatment=="No_treatment",]
+
+agg1_ofe_rg2_A$Remarks <-factor(agg1_ofe_rg2_A$Remarks, levels = c("High_HSI_1",
+                                                                   "Moderate_HSI_1",
+                                                                   "Low_HSI_1"))
+
+agg1_ofe_rg2_A<-agg1_ofe_rg2_A[((agg1_ofe_rg2_A$OFE==1)&(agg1_ofe_rg2_A$Remarks == "Low_HSI_1"))|
+                ((agg1_ofe_rg2_A$OFE==1)&(agg1_ofe_rg2_A$Remarks == "Moderate_HSI_1"))|
+                 ((agg1_ofe_rg2_A$OFE==3)&(agg1_ofe_rg2_A$Remarks == "High_HSI_1")),]
+
+agg1_ofe_rg2_A$Remarks<-factor(agg1_ofe_rg2_A$Remarks, labels = c("High HSI",
+                                                                  "Moderate HSI",
+                                                                  "Low HSI"))
+
+ggplot(agg1_ofe_rg2_A, aes(as.factor(Year),Runoff, fill = Remarks))+
+  # geom_point()
+  geom_bar(position = "dodge", stat = "identity")+
+  xlab("Simulation Year")+
+  ylab("Runoff (mm)")+
+  my_custom_themes+
+  theme(
+    strip.text.x = element_text(size = 24),
+    axis.text.x.bottom = element_text(size=24, angle = 0,color = "black"),
+    axis.text.y.left = element_text(size=24, color = "black"),
+    axis.text.x = element_text(size = 30),
+    axis.text.y = element_text(size = 30),
+    axis.title.x = element_text(size = 30),
+    axis.title.y = element_text(size = 30),
+    legend.text = element_text(size = 25),
+    legend.position = c(0.99,0.99),
+    legend.direction = "vertical")
+  
+# ggsave("Yearly runoff for three HSI class2.eps", height = 10, width = 10)
+
+### Average in three scenarios 
+
+aggregate(Runoff~Remarks+OFE,agg1_ofe_rg2_A, mean)
+
+
+#### After Rain garden treatment 
+
+agg1_ofe_rg2_B<-agg1_ofe_rg2[agg1_ofe_rg2$OFE==3,]
+
+agg1_ofe_rg2_B$Remarks <-factor(agg1_ofe_rg2_B$Remarks, levels = c("High_HSI_1",
+                                                                   "Moderate_HSI_1",
+                                                                   "Low_HSI_1"))
+
+agg1_ofe_rg2_B<-agg1_ofe_rg2_B[((agg1_ofe_rg2_B$OFE==3)&(agg1_ofe_rg2_B$Remarks == "Moderate_HSI_1"))|
+                 ((agg1_ofe_rg2_B$OFE==3)&(agg1_ofe_rg2_B$Remarks == "High_HSI_1")),]
+ggplot(agg1_ofe_rg2_B, aes(Year,Runoff, fill = Treatment))+
+  # geom_point()+geom_line()+
+  geom_bar(stat = "identity", position = "dodge")+
+  facet_wrap(~Remarks)
+
+# ggsave("yearly_RGvsNT_HSIs_brmgrass.eps", height = 12, width = 12)
+
+
+```
+
+
+
+
+```{r, echo=FALSE, include=FALSE}
+# 
+# 
+# len_col<-c("grey10", "grey30","grey50","grey70", "white",
+#              "yellow", "orange","red","lightyellow", "pink",
+#              "green", "darkblue","darkgreen","lightblue", "lightgreen",
+#             "#980043", "#cbc9e2","#9e9ac8","#756bb1", "#54278f",
+#             "green", "darkblue","darkgreen","lightblue", "lightgreen",
+#             "grey10", "grey30","grey50","grey70", "white")
+# 
+# levs<-c("Sce1","Sce2","Sce3","Sce4","Sce5",
+#         "Sce6","Sce7","Sce8","Sce9","Sce10",
+#         "Sce11","Sce12","Sce13","Sce14","Sce15",
+#        "Sce16","Sce17","Sce18","Sce19","Sce20",
+#        "Sce21", "Sce22", "Sce23","Sce24", "Sce25",
+#        "Sce26", "Sce27", "Sce28","Sce29", "Sce30",
+#        "Sce31", "Sce32", "Sce33","Sce34", "Sce35",
+#        "Sce36", "Sce37", "Sce38", "Sce39", "Sce40",
+#        "Sce41", "Sce42", "Sce43","Sce44", "Sce45")
+# 
+# leng <- c("Len20_A", "Len40_A","Len80_A","Len100_A", "Len200_A",
+#           "Len20_B", "Len40_B","Len80_B","Len100_B", "Len200_B",
+#           "Len20_R_0.00072", "Len40_R_0.0072","Len80_R_0.072_C","Len100_R_0.72", "Len200_R_7.2",
+#           "Len20_R_7.2", "Len40_R_0.72","Len80_R_0.072_D","Len100_R_0.0072", "Len200_R_0.00072",
+#           "Len40_R_0.00072_E", "Len40_R_0.0072_E","Len40_R_0.072_E","Len40_R_0.72_E", "Len40_R_7.2_E",
+#           "Len20_F", "Len40_F","Len80_F","Len100_F", "Len200_F",
+#           "Len20_G", "Len40_G","Len80_G","Len100_G", "Len200_G"
+#           )
+# # df$Group <- cut(seq_along(df$Scenario), breaks = 3, labels = c("Group 1", "Group 2", "Group 3"))
+# df$scens<-factor(df$Scenario,levels = levs, labels = leng)
+
+########################
+
+agg0<-aggregate(cbind(`Rain+snowmelt`)~Year+Scenario+Group,df, sum)
+
+df_ofe_avg<-aggregate(cbind(Runoff,ET, `Lateral subsurface flow`, `Deep perc.`)~Year+Month+Day+Scenario+Group+
+                  Res_layer+Slope_steepness+Slope_length+Slope_depth,df, mean)
+
+agg1<-aggregate(cbind(Runoff,ET, `Lateral subsurface flow`, `Deep perc.`)~Year+Scenario+Group+
+                  Res_layer+Slope_steepness+Slope_length+Slope_depth,df_ofe_avg, sum)
+
+
+# agg_drain_depth<-aggregate(cbind(`Total Soil water`,`Depth_to_drainable_zone`)~Scenario+Group+
+                  # Res_layer+Slope_steepness+Slope_length,df, mean)
+
+agg2<-aggregate(cbind(Runoff,ET, `Lateral subsurface flow`, `Deep perc.`)~Scenario+Group+
+                  Res_layer+Slope_steepness+Slope_length+Slope_depth, agg1,mean)
+
+agg1_piv<-pivot_longer(agg2, cols = c("Runoff","ET","Lateral subsurface flow", "Deep perc."), names_to = "Wat_vars", values_to = "Water Depth (mm)")
+#agg1_piv$OFE<-as.factor(agg1_piv$OFE)
+
+# agg_depth_piv<-pivot_longer(agg_drain_depth, cols = c("Total Soil water","Depth_to_drainable_zone"), names_to = "Wat_vars", values_to = "Water Depth (mm)")
+#agg1_piv$OFE<-as.factor(agg1_piv$OFE)
+
+# final_pivs <-rbind(agg1_piv, agg_depth_piv)
+
+agg1_piv$Slope_length<-as.factor(agg1_piv$Slope_length)
+
+ggplot(agg1_piv, aes(fill = Slope_length, x = Wat_vars, `Water Depth (mm)`), check_overlap = TRUE)+geom_bar(position = "dodge", stat = "identity", color = "black")+
+# scale_fill_manual(values=len_col_3)+  
+  # geom_text(aes(fill = Slope_length, x = Wat_vars, y =`Water Depth (mm)`,  label = `Water Depth (mm)`, angle = 90), 
+             # position = position_dodge(0.9))+
+  facet_grid(rows = vars(Slope_depth), cols = vars(Res_layer), scales = "free")+
+  # facet_wrap(~Slope_steepness+Res_layer, nrow = 3, scales = "free")+ #+my_custom_themes
+  theme(axis.text.x.bottom = element_text(angle = 90, size = 10),
+        legend.text = element_text(size = 15))
+
+# ggsave('water_balance_3ofe_scenarios_base.eps', width = 16, height = 10)
+
+
+# ggplot(final_pivs, aes( x = Group, fill = scens, y= `Water Depth (mm)`))+geom_bar(position = "dodge", stat = "identity")+
+# scale_fill_manual(values=len_col_3)+  
+#   
+#   facet_wrap(~Wat_vars, ncol = 1, scales = "free")+ #+my_custom_themes
+#   theme(axis.text.x.bottom = element_text(angle = 90, size = 10),
+#         legend.text = element_text(size = 15))
+
+
+#ggsave("water_balance_diff_hillslope_scenarios.eps", width = 14, height = 12)
+
+```
+
+### Map ofes separately ### 
+
+
+```{r, include=FALSE}
+
+
+
+agg1_ofe<-aggregate(cbind(Runoff,ET, `Lateral subsurface flow`, `Deep perc.`)~OFE+Year+Scenario+Group+
+                  Res_layer+Slope_steepness+Slope_length+Slope_depth,df, sum)
+
+
+# agg_drain_depth<-aggregate(cbind(`Total Soil water`,`Depth_to_drainable_zone`)~Scenario+Group+
+                  # Res_layer+Slope_steepness+Slope_length,df, mean)
+
+agg2_ofe<-aggregate(cbind(Runoff,ET, `Lateral subsurface flow`, `Deep perc.`)~OFE+Scenario+Group+
+                  Res_layer+Slope_steepness+Slope_length+Slope_depth, agg1_ofe,mean)
+
+agg1_piv_ofe<-pivot_longer(agg2_ofe, cols = c("Runoff","ET","Lateral subsurface flow", "Deep perc."), names_to = "Wat_vars", values_to = "Water Depth (mm)")
+#agg1_piv$OFE<-as.factor(agg1_piv$OFE)
+
+# agg_depth_piv<-pivot_longer(agg_drain_depth, cols = c("Total Soil water","Depth_to_drainable_zone"), names_to = "Wat_vars", values_to = "Water Depth (mm)")
+#agg1_piv$OFE<-as.factor(agg1_piv$OFE)
+
+# final_pivs <-rbind(agg1_piv, agg_depth_piv)
+
+agg1_piv_ofe$Slope_length<-as.factor(agg1_piv_ofe$Slope_length)
+
+ggplot(agg1_piv_ofe, aes(fill = Slope_length, x = OFE, `Water Depth (mm)`), check_overlap = TRUE)+geom_bar(position = "dodge", stat = "identity", color = "black")+
+# scale_fill_manual(values=len_col_3)+  
+  # geom_text(aes(fill = Slope_length, x = Wat_vars, y =`Water Depth (mm)`,  label = `Water Depth (mm)`, angle = 90), 
+             # position = position_dodge(0.9))+
+  facet_grid(rows = vars(Slope_depth), cols = vars(Wat_vars), scales = "free")+
+  # facet_wrap(~Slope_steepness+Res_layer, nrow = 3, scales = "free")+ #+my_custom_themes
+  theme(axis.text.x.bottom = element_text(angle = 90, size = 10),
+        legend.text = element_text(size = 15))
+
+#ggsave('water_balance_3ofe_separately.eps', width = 16, height = 10)
+
+
+```
+
+
+##### Saturation Excess ###############
+```{r, echo = FALSE, include=FALSE}
+
+# checkday_sat<-weppdata_joined[weppdata_joined$Runoff>20&weppdata_joined$Y==8,]
+checkday_sat<-weppdata_joined[weppdata_joined$J>63&weppdata_joined$J<66&weppdata_joined$Y==8&weppdata_joined$Scenario=="Sce35",]
+
+# write.csv(checkday_sat, "F:/WORK/GSI_Project/WEPP vs HSI/New_scenarios_puyallup_1_2_ofes/All_representative_data/runoff_classification.csv", row.names = FALSE)
+
+# max(weppdata_last_L$`Total Soil water`)
+runoff_classify<-function(poro, sw1, fzw1, ro){
+  tw <- sw1+fzw1+1   ### This is about 1 mm for entrapped air
+  depth_first_layer <- 100 ## mm
+  total_possible_water <- (poro/100) * depth_first_layer
+  t_mst_cntnt <-(tw/depth_first_layer)*100  ### moisture content
+  
+  if(t_mst_cntnt>=poro){
+    soil_state<-"saturated"
+    if(ro>0){
+      runofftype <- "Saturation excess runoff"
+    }
+    else{
+      runofftype<-"no runoff"
+    }
+  }else{
+    soil_state<-"Unsaturated"
+    if(ro>0){
+      runofftype<-"Infiltration excess runoff"
+    }else{
+      runofftype<-"no runoff"
+    }
+  }
+return(runofftype)
+}
+
+
+weppdata_joined$runofftype<-mapply(runoff_classify, as.matrix(weppdata_joined[,18]),as.matrix(weppdata_joined[,19]),as.matrix(weppdata_joined[,29]),as.matrix(weppdata_joined[,6]))
+
+
+# Scenario+Group+
+#                   Res_layer+Slope_steepness+Slope_length
+
+runoff_type_count<-weppdata_joined %>% count(runofftype, OFE,Scenario, Group, Res_layer, Slope_steepness,Slope_length,Wateryear,Depth,SoilK,Treatment)
+# runoff_type_count<-weppdata_joined %>% count(runofftype, OFE, Scenario,Wateryear )
+
+runoff_type_avg<-aggregate(n~runofftype+OFE+Scenario+Group+Res_layer+Slope_steepness+
+                                             Slope_length+SoilK+Treatment+Depth, runoff_type_count, mean)
+
+
+runoff_type_avg2<-aggregate(n~runofftype+Scenario+Group+Res_layer+Slope_steepness+
+                                             Slope_length+SoilK+Treatment+Depth, runoff_type_avg, mean)
+
+runoff_type_avg3<-aggregate(n~runofftype+Treatment,runoff_type_avg2, mean)
+
+sw_2<-aggregate(SW_L1~OFE+Scenario, weppdata_joined,mean)
+
+runoff_type_avg$Slope_length<-as.factor(runoff_type_avg$Slope_length)
+
+ggplot(runoff_type_avg[runoff_type_avg$runofftype!="no runoff",], aes(fill = runofftype, x = OFE, n))+geom_bar(position = "stack", stat = "identity")+
+# scale_fill_manual(values=len_cols)+  
+  
+  facet_wrap(~Slope_steepness, ncol = 3, scales = "free")+ #+my_custom_themes
+  theme(axis.text.x.bottom = element_text(angle = 10, size = 10))
+
+
+```
+
+
+
+
+#### Varying steepness
+
+```{r, echo=FALSE, include=FALSE}
+# Annual averages in all scenarios
+
+####Length ############
+
+df<-weppdata[(weppdata$Group!="Group C"),]
+df<-df[(df$Group!="Group B"),]
+df<-df[(df$Group!="Group D"),]
+df<-df[(df$Group!="Group E"),]
+df<-df[(df$Group!="Group F"),]
+df<-df[(df$Group!="Group G"),]
+
+
+len_col_3<-c("grey10", "grey30","grey50","grey70", "white",
+             "yellow", "orange","red","lightyellow", "pink",
+             "green", "darkblue","darkgreen","lightblue", "lightgreen",
+            "#980043", "#cbc9e2","#9e9ac8","#756bb1", "#54278f",
+            "green", "darkblue","darkgreen","lightblue", "lightgreen",
+            "grey10", "grey30","grey50","grey70", "white")
+
+levs<-c("Sce1","Sce2","Sce3","Sce4","Sce5",
+        "Sce6","Sce7","Sce8","Sce9","Sce10",
+        "Sce11","Sce12","Sce13","Sce14","Sce15",
+       "Sce16","Sce17","Sce18","Sce19","Sce20",
+       "Sce21", "Sce22", "Sce23","Sce24", "Sce25",
+       "Sce26", "Sce27", "Sce28","Sce29", "Sce30",
+       "Sce31", "Sce32", "Sce33","Sce34", "Sce35",
+       "Sce36", "Sce37", "Sce38","Sce39", "Sce40",
+       "Sce41", "Sce42", "Sce43","Sce44", "Sce45",
+       "Sce46", "Sce47", "Sce48","Sce49", "Sce50")
+
+leng <- c("Len20_A", "Len40_A","Len80_A","Len100_A", "Len200_A",
+          "Len20_B", "Len40_B","Len80_B","Len100_B", "Len200_B",
+          "Len20_R_0.00072", "Len40_R_0.0072","Len80_R_0.072_C","Len100_R_0.72", "Len200_R_7.2",
+          "Len20_R_7.2", "Len40_R_0.72","Len80_R_0.072_D","Len100_R_0.0072", "Len200_R_0.00072",
+          "Len40_R_0.00072_E", "Len40_R_0.0072_E","Len40_R_0.072_E","Len40_R_0.72_E", "Len40_R_7.2_E",
+          "Len20_F", "Len40_F","Len80_F","Len100_F", "Len200_F",
+          "Len20_G", "Len40_G","Len80_G","Len100_G", "Len200_G",
+          "Len20_H", "Len40_H","Len80_H","Len100_H", "Len200_H",
+          "Len20_I", "Len40_I","Len80_I","Len100_I", "Len200_I",
+          "Len20_J", "Len40_J","Len80_J","Len100_J", "Len200_J")
+
+
+
+
+
+# df$Group <- cut(seq_along(df$Scenario), breaks = 3, labels = c("Group 1", "Group 2", "Group 3"))
+df$scens<-factor(df$Scenario,levels = levs, labels = leng)
+
+########################
+
+
+agg0<-aggregate(cbind(`Rain+snowmelt`)~Year+scens+Group,df, sum)
+agg1<-aggregate(cbind(Runoff,ET, `Lateral subsurface flow`, `Deep perc.`)~Year+scens+Group,df, sum)
+
+agg_drain_depth<-aggregate(cbind(`Total Soil water`,`Depth_to_drainable_zone`)~scens+Group,df, mean)
+
+agg2<-aggregate(cbind(Runoff,ET, `Lateral subsurface flow`, `Deep perc.`)~scens+Group, agg1,mean)
+
+agg1_piv<-pivot_longer(agg2, cols = c("Runoff","ET","Lateral subsurface flow", "Deep perc."), names_to = "Wat_vars", values_to = "Water Depth (mm)")
+#agg1_piv$OFE<-as.factor(agg1_piv$OFE)
+
+agg_depth_piv<-pivot_longer(agg_drain_depth, cols = c("Total Soil water","Depth_to_drainable_zone"), names_to = "Wat_vars", values_to = "Water Depth (mm)")
+#agg1_piv$OFE<-as.factor(agg1_piv$OFE)
+
+final_pivs <-rbind(agg1_piv, agg_depth_piv)
+
+ggplot(agg1_piv, aes(fill = scens, x = Wat_vars, `Water Depth (mm)`))+geom_bar(position = "dodge", stat = "identity")+
+scale_fill_manual(values=len_col_3)+  
+  
+  facet_wrap(~Group, ncol = 2, scales = "free")+ #+my_custom_themes
+  theme(axis.text.x.bottom = element_text(angle = 10, size = 10),
+        legend.text = element_text(size = 15))
+
+# ggsave('water_balance_3_more_scenarios_varyingsteepness.eps', width = 16, height = 10)
+
+
+ggplot(final_pivs, aes( x = Group, fill = scens, y= `Water Depth (mm)`))+geom_bar(position = "dodge", stat = "identity")+
+scale_fill_manual(values=len_col_3)+  
+  
+  facet_wrap(~Wat_vars, ncol = 1, scales = "free")+ #+my_custom_themes
+  theme(axis.text.x.bottom = element_text(angle = 10, size = 10),
+        legend.text = element_text(size = 15))
+
+
+#ggsave("water_balance_diff_hillslope_scenarios.eps", width = 14, height = 12)
+
+```
+# Annual water balance in single year for three ofes in **Puyallup**
+
+```{r, echo=FALSE, fig.width=14,fig.height=10}
+
+sce_ord<-c("Sce1", "Sce2", "Sce3",
+           "Sce4", "Sce5", "Sce6",
+           "Sce7", "Sce8", "Sce9",
+           "Sce10","Sce11","Sce12",
+           "Sce13", "Sce14")
+
+sce_labs<-c("Control","Longerslope_length","Ofe_1_2_DoubleLength",
+            "Ofe2_HighSlope", "Ofe2_HighK","Ofe2_Pavemnt","Ofe2_No_Restrct.",
+            "Ofe_1_2_Shallw_dpt","Ofe1_HighK","Ofe2_HighK_No_Restrct.","Ofe1_Pavemnt",
+            "Ofe3_High_Dpt_K")
+
+new_sce_labs<-c("Control","longerslope_Length","Ofe1_Pavemnt",
+                  "Ofe2_HighSlope", "Ofe2_HighK","Ofe2_Pavemnt","Ofe2_No_Restrct.",
+                "Ofe2_HighK_No_Restrct.",
+                "Ofe_1_2_HalfLength","Ofe_1_2_DoubleLength", "Ofe_1_2_Shallw_dpt",
+                "Ofe3_High_Dpt_K", "Ofe_1_High_soil_dpt", "Ofe_3_Low_K_soil_dpt")
+# sce_color<-c("Sce1" = "#f7fcfd", "Sce2"= "#bae4b3", "Sce3"= "#74c476",
+#            "Sce4" = "#31a354", "Sce5"="#006d2c", "Sce6"="#bdd7e7",
+#            "Sce7"="#6baed6", "Sce8"="#3182bd", "Sce9"="#08519c",
+#            "Sce10"="black")
+
+sce_color<-c("Control" = "orange", "longerslope_Length"= "#bae4b3", "Ofe_1_2_DoubleLength"= "#74c476",
+          "Ofe2_HighSlope" = "#3182bd", "Ofe2_HighK"="pink", "Ofe2_Pavemnt"="#bdd7e7",
+           "Ofe2_No_Restrct."="brown", "Ofe_1_2_Shallw_dpt"="#31a354", "Ofe1_HighK"="#08519c",
+           "Ofe2_HighK_No_Restrct."="black",
+          "Ofe1_Pavemnt"="Red","Ofe3_High_Dpt_K" = "darkgreen",
+         "Ofe_1_High_soil_dpt"="grey", "Ofe_3_Low_K_soil_dpt"="yellow")
+
+agg1_piv_1 = agg1_piv[agg1_piv$Year=="0005",]
+
+agg1_piv_1$Scenario <- factor(agg1_piv_1$Scenario, levels = sce_ord, labels = new_sce_labs)
+
+ggplot(agg1_piv_1, aes(fill = Scenario, x = OFE, `Water Depth (mm)`))+geom_bar(position = "dodge", stat = "identity")+
+  scale_fill_manual(values = sce_color)+
+  facet_wrap(~Wat_vars, ncol = 1, scales = "free")+ #+my_custom_themes
+  theme(axis.text.x.bottom = element_text(angle = 0, size = 20),
+        axis.text.y.left = element_text(size =20),
+        axis.title.y = element_text(size = 20),
+        strip.text.x = element_text(size = 20),
+        legend.text= element_text(size = 20))
+# ggsave("scenarios_sing_year_puyallup.eps", width = 14, height = 10)
+```
+
+## Selecting various types of HSI 
+
+### Low HSI
+
+```{r, include=FALSE}
+
+low_sce <- c("Control",
+                  "Ofe2_HighSlope", "Ofe2_HighK","Ofe2_Pavemnt","Ofe2_No_Restrct.",
+                "Ofe2_HighK_No_Restrct.",
+                "Ofe_1_2_HalfLength", "Ofe_1_2_Shallw_dpt",
+                "Ofe_1_High_soil_dpt")
+
+
+# agg1_piv_1 %>%
+#   subset(Scenario, low_sce)
+
+agg_piv_1_lowhsi<-subset(agg1_piv_1, Scenario==low_sce)
+
+agg_piv_1_lowhsi<-agg1_piv_1[agg1_piv_1$Scenario %in% low_sce,]
+
+
+ggplot(agg_piv_1_lowhsi, aes(fill = Scenario, x = OFE, `Water Depth (mm)`))+geom_bar(position = "dodge", stat = "identity")+
+  scale_fill_manual(values = sce_color)+
+  facet_wrap(~Wat_vars, ncol = 1, scales = "free")+ #+my_custom_themes
+  theme(axis.text.x.bottom = element_text(angle = 0, size = 20),
+        axis.text.y.left = element_text(size =20),
+        axis.title.y = element_text(size = 20),
+        strip.text.x = element_text(size = 20),
+        legend.text= element_text(size = 20))
+
+
+```
+
+
+## Selecting one day and comparing 
+
+#### for the group a
+
+```{r, include=FALSE}
+
+checkday <-weppdata[weppdata$J>339&weppdata$J<365&weppdata$Y==1&weppdata$Group=="Group A",]
+
+
+```
+
+## Selecting one day and comparing 
+
+#### for the group K
+
+```{r, include=FALSE}
+
+checkday <-weppdata[weppdata$J>69&weppdata$J<90&weppdata$Y==1&weppdata$Group=="Group K",]
+
+checkday2 <-weppdata[weppdata$J>332&weppdata$J<334&weppdata$Y==1&weppdata$Group=="Group K",]
+# nnn<-which(weppdata$`Lateral subsurface flow`== max(weppdata$`Lateral subsurface flow`))
+# 
+# check3<-weppdata[nnn,]
+```
+
+
+
+
+
+
+
+### Comparing the Scenarios with **Control** Scenario
+
+*Sce 1: Control
+
+*Sce 2 **(Ofe 1 had high K (3 times))**: High K in ofe 1 increased the lateral flow... this didnt have pronounced effect on OFE 3.
+
+*Sce 3 **(Ofe 1 Pavement)**: Pavement in ofe 1 meant that runoff was very high in OFE 1. Which increased ET, runoff and subsurface flow in OFE 2.
+
+*Sce 4 **(Ofe 2 slope was Double)**: Because of High slope in OFE 2, lateral subsurface flow in OFE 2 increased.. because of increase in gradient.
+
+*Sce 5 **(Ofe 2 K was 5 times)**: Because of High K, subsurface flow increased in OFE 2. This decreased the runoff from OFE 2. 
+
+*Sce 6 **(Ofe 2 Pavement)**: Having a Pavement in OFE 2 meant that water Runoff increased in OFE 2... Which contributed to increase in ET, runoff,         and lateral flow in OFE 3.
+
+*Sce 7 **(Ofe 2 No Restrictive Layer)**: Having no restrictive layer in OFE 2... took all the lateral subsurface flow from OFE2, this resulted in low runoff            in OFE 2, and OFE 3.
+
+*Sce 8 **(Ofe 2 had high K (5 times)) AND No Restrictive Layer**: High K in ofe 2 with no Restrictive layer meant that water was essentially diverted away from ofe 2. This decreased the runoff in ofe 3.
+
+*Sce 9 **(Ofe 1 and 2 slope length was half)**: Decrease of slope length decreased the contributing area.. So we see less runoff.
+
+*Sce 10 **(Ofe 1 and 2 slope length was Double)**: Increasing the slope length increased the contributing area.. so we see higher runoff.
+
+*Sce 11 **(Ofe 1 and 2 had shallow depth)**: Shallow depth in OFE 1 and 2 meant that runoff was higher in OFE 2 and lateral flow decreased. This also increased ET in ofe 1 and 2. This didnt have pronounced effect on ofe 3.
+
+*Sce 12 **(Ofe 3 High Soil depth and High K)**: High depth and high K in ofe 3 meant that runoff was very low.. But lateral flow is higher.
+  
+
+
+# Computing Soil Saturation 
+
+```{r, echo=FALSE, fig.width=14, fig.height=16}
+
+
+ofe1_dep <-c(1000, 1000,1000, 1000,1000,1000,
+             1000,1000,1000,1000,300,1000)
+ofe2_dep<-c(1000, 1000,1000, 1000,1000,1000,
+             1000,1000,1000,1000,300,1000)
+
+ofe3_dep<-c(1000, 1000,1000, 1000,1000,1000,
+             1000,1000,1000,1000,1000,1500)
+
+
+ofe_depth_list<-list(ofe1_dep, ofe2_dep, ofe3_dep)
+
+calc_sat2<-function(ofeno, scena_no, slwat, frzwat){
+  sce_no = as.numeric(strsplit(scena_no, "Sce")[[1]][2])
+  sldp<-ofe_depth_list[[ofeno]][sce_no]
+  sat_val<-calc_sat(slwat,frzwat, sldp)
+  
+  # list2<-c(sce_no, sldp, sat_val)
+  
+  return(sat_val)
+}
+
+
+weppdata$sat<-mapply(calc_sat2,as.matrix(weppdata[,1]),as.matrix(weppdata[,16]),as.matrix(weppdata[,13]),as.matrix(weppdata[,14]))
+
+
+
+weppdata_singyear<-weppdata[weppdata$Year==1945,]
+
+
+
+sce_ord<-c("Sce1", "Sce2", "Sce3",
+           "Sce4", "Sce5", "Sce6",
+           "Sce7", "Sce8", "Sce9",
+           "Sce10","Sce11","Sce12")
+
+sce_labs<-c("Control","Ofe_1_2_HalfLength","Ofe_1_2_DoubleLength",
+            "Ofe2_HighSlope", "Ofe2_HighK","Ofe2_Pavemnt","Ofe2_No_Restrct.",
+            "Ofe_1_2_Shallw_dpt","Ofe1_HighK","Ofe2_HighK_No_Restrct.","Ofe1_Pavemnt",
+            "Ofe3_High_Dpt_K")
+
+new_sce_labs<-c("Control","Ofe1_HighK","Ofe1_Pavemnt",
+                  "Ofe2_HighSlope", "Ofe2_HighK","Ofe2_Pavemnt","Ofe2_No_Restrct.",
+                "Ofe2_HighK_No_Restrct.",
+                "Ofe_1_2_HalfLength","Ofe_1_2_DoubleLength", "Ofe_1_2_Shallw_dpt",
+                "Ofe3_High_Dpt_K")
+# sce_color<-c("Sce1" = "#f7fcfd", "Sce2"= "#bae4b3", "Sce3"= "#74c476",
+#            "Sce4" = "#31a354", "Sce5"="#006d2c", "Sce6"="#bdd7e7",
+#            "Sce7"="#6baed6", "Sce8"="#3182bd", "Sce9"="#08519c",
+#            "Sce10"="black")
+
+sce_color<-c("Control" = "orange", "Ofe_1_2_HalfLength"= "#bae4b3", "Ofe_1_2_DoubleLength"= "#74c476",
+          "Ofe2_HighSlope" = "#3182bd", "Ofe2_HighK"="pink", "Ofe2_Pavemnt"="#bdd7e7",
+           "Ofe2_No_Restrct."="brown", "Ofe_1_2_Shallw_dpt"="#31a354", "Ofe1_HighK"="#08519c",
+           "Ofe2_HighK_No_Restrct."="black",
+          "Ofe1_Pavemnt"="Red","Ofe3_High_Dpt_K" = "darkgreen")
+
+
+weppdata_singyear$Scenario<-factor(weppdata_singyear$Scenario, levels = sce_ord, labels = new_sce_labs)
+
+ggplot(weppdata_singyear, aes(J, sat,color=Scenario))+
+  # geom_point()+
+  geom_line(size = 1.2)+
+  scale_color_manual(values = sce_color)+
+  facet_wrap(~OFE, ncol = 1)+
+  theme(axis.text.x.bottom = element_text(angle = 0, size = 20),
+        axis.text.y.left = element_text(size =20),
+        axis.title.y = element_text(size = 20),
+        strip.text.x = element_text(size = 20),
+        legend.text= element_text(size = 20))
+
+
+
+```
+
+
+```{r, echo==FALSE}
+
+### Modeling 
+
+agg0_A<-agg0[agg0$Group=="Group A"&(agg0$scens=="Len20_A"|agg0$scens=="Len40_A"),]
+agg1_A<-agg1[agg1$Group=="Group A"&(agg0$scens=="Len20_A"|agg0$scens=="Len40_A"),]
+
+```
+
+
