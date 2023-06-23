@@ -8,3 +8,5 @@ Placement of Green Stormwater Infrastructure using Hydrological Sensitivity Inde
 ```C2_raingarden_final.py``` can be used to filter unsuitable areas for the placement of rain garden and extract suitable areas.
 
 ```C3_classify2.py``` can be used to classify the suitable areas for the placement of rain garden using fishnet.
+
+```C3_classify2_zonify.py``` uses alternative method for zonification where composite HSI is computed using the fishnet to classify the suitable areas.
